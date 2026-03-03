@@ -17,8 +17,18 @@ _SUBMODULE_DIR = os.path.normpath(
 
 
 def _ensure_submodule_on_path() -> None:
+    # Remove any existing submodule paths that might cause collisions
+    ocr_root = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "ocr"))
+    sys.path = [p for p in sys.path if not (p.startswith(ocr_root) and p != _SUBMODULE_DIR)]
+    
     if _SUBMODULE_DIR not in sys.path:
         sys.path.insert(0, _SUBMODULE_DIR)
+
+    # Clear modules that are commonly named across different submodules
+    # to force re-import from the new sys.path entry.
+    for mod_name in ["model_detect_openvino", "model_detect_trt", "utils", "procd_date", "procd_holo", "procd_temper"]:
+        if mod_name in sys.modules:
+            del sys.modules[mod_name]
 
 
 def _b64_png(img: np.ndarray) -> str:
@@ -36,6 +46,10 @@ class TemperNumAdapter(InspectionAdapter):
     Performs OCR on temperature/expiry number panels.
     Only OpenVINO (CPU) backend is available; TRT weights are not provided.
     """
+
+    @classmethod
+    def accepted_kwargs(cls) -> set[str]:
+        return {"include_diag"}
 
     def __init__(self) -> None:
         self._proc: Any = None

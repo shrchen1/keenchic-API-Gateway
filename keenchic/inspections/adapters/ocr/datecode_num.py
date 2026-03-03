@@ -21,11 +21,21 @@ _DATECODE_PKG_DIR = os.path.join(_SUBMODULE_DIR, "datecode_num_st")
 
 
 def _ensure_submodule_on_path() -> None:
+    # Remove any existing submodule paths that might cause collisions
+    ocr_root = _SUBMODULE_DIR
+    sys.path = [p for p in sys.path if not (p.startswith(ocr_root) and p not in (_SUBMODULE_DIR, _DATECODE_PKG_DIR))]
+
     # datecode_num_st uses bare `from utils import ...` internally,
     # so the package directory itself must also be on sys.path.
     for path in (_SUBMODULE_DIR, _DATECODE_PKG_DIR):
         if path not in sys.path:
             sys.path.insert(0, path)
+
+    # Clear modules that are commonly named across different submodules
+    # to force re-import from the new sys.path entry.
+    for mod_name in ["model_detect_openvino", "model_detect_trt", "utils", "procd_date", "procd_holo", "procd_temper"]:
+        if mod_name in sys.modules:
+            del sys.modules[mod_name]
 
 
 def _b64_png(img: np.ndarray) -> str:
@@ -44,6 +54,10 @@ class DatecodeNumAdapter(InspectionAdapter):
     - v1: single date image → OCR result
     - v2: date image + permit image → OCR + permit code + product lookup
     """
+
+    @classmethod
+    def accepted_kwargs(cls) -> set[str]:
+        return {"include_diag", "YMD_option", "permit_image"}
 
     def __init__(self) -> None:
         self._proc: Any = None

@@ -10,6 +10,15 @@ class InspectionAdapter(ABC):
     and are registered in keenchic/inspections/registry.py.
     """
 
+    @classmethod
+    def accepted_kwargs(cls) -> set[str]:
+        """Return the set of kwargs accepted by this adapter's run() method.
+
+        Override in subclasses to declare inspection-specific fields.
+        The router uses this to reject unexpected fields with HTTP 422.
+        """
+        return {"include_diag"}
+
     @abstractmethod
     def load_models(self, backend: str) -> None:
         """Load all required model weights for the given backend.

@@ -6,17 +6,26 @@
 
 ## 目錄
 
-- [系統需求](#系統需求)
-- [快速開始](#快速開始)
-- [環境變數](#環境變數)
-- [啟動方式](#啟動方式)
-- [API 文件](#api-文件)
-  - [健康檢查](#get-health)
-  - [影像辨識](#post-apiv1inspect)
-  - [Result Code 對照表](#result-code-對照表)
-  - [Inspection 清單與回應欄位](#inspection-清單與回應欄位)
-- [架構說明](#架構說明)
-- [新增 Adapter](#新增-adapter)
+- [Keenchic Inspection API Gateway](#keenchic-inspection-api-gateway)
+  - [目錄](#目錄)
+  - [系統需求](#系統需求)
+  - [快速開始](#快速開始)
+  - [環境變數](#環境變數)
+  - [啟動方式](#啟動方式)
+    - [使用 serve.py（推薦）](#使用-servepy推薦)
+    - [使用 entry point](#使用-entry-point)
+    - [使用 uvicorn（進階）](#使用-uvicorn進階)
+  - [API 文件](#api-文件)
+    - [GET /health](#get-health)
+    - [POST /api/v1/inspect](#post-apiv1inspect)
+    - [Result Code 對照表](#result-code-對照表)
+    - [Inspection 清單與回應欄位](#inspection-清單與回應欄位)
+      - [`ocr/datecode-num` — 日期碼 OCR](#ocrdatecode-num--日期碼-ocr)
+      - [`ocr/holo-num` — 全息數字 OCR](#ocrholo-num--全息數字-ocr)
+      - [`ocr/pill-count` — 藥丸計數](#ocrpill-count--藥丸計數)
+      - [`ocr/temper-num` — 溫度 / 有效期 OCR](#ocrtemper-num--溫度--有效期-ocr)
+  - [架構說明](#架構說明)
+  - [新增 Adapter](#新增-adapter)
 
 ---
 
@@ -151,11 +160,14 @@ uv run uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
 
 **Request（multipart/form-data）**
 
-| 欄位 | 類型 | 必填 | 說明 |
-|---|---|---|---|
-| `image` | file | 是 | 待辨識影像（PNG / JPG 等 OpenCV 支援格式） |
-| `permit_image` | file | 否 | 許可證影像（僅 `ocr/datecode-num` v2 使用） |
-| `YMD_option` | string | 否 | 僅 `ocr/datecode-num`：`1`=D/M/Y（預設），`2`=M/D/Y |
+| 欄位 | 類型 | 說明 |
+|---|---|---|
+| `image` | file | 待辨識影像（PNG / JPG 等 OpenCV 支援格式）。除 `ocr/datecode-num` 外均為必填 |
+| `date_image` | file | 僅 `ocr/datecode-num`：日期戳記影像。優先於 `image`；兩者至少提供其一 |
+| `permit_image` | file | 僅 `ocr/datecode-num`：許可證影像（選填）。提供時觸發 FDA 資料庫查詢 |
+| `YMD_option` | string | 僅 `ocr/datecode-num`：`1`=D/M/Y（預設），`2`=M/D/Y |
+
+> 傳入某個 inspection 不支援的欄位（如對 `ocr/pill-count` 傳 `permit_image`），會收到 HTTP 422。
 
 **Query 參數**
 
@@ -220,10 +232,10 @@ curl -X POST "http://localhost:8000/api/v1/inspect?include_diag=true" \
 
 | HTTP 狀態碼 | 原因 |
 |---|---|
-| `400` | 影像無法解碼、缺少必要欄位 |
+| `400` | 影像檔案無法解碼（非有效圖片格式） |
 | `401` | `X-API-KEY` 缺失或不正確 |
-| `404` | `X-Inspection-Name` 不存在於 registry |
-| `500` | 伺服器內部錯誤（含 `KEENCHIC_API_KEY` 未設定） |
+| `422` | 缺少必要欄位、`X-Inspection-Name` 不存在、傳入不支援的欄位 |
+| `503` | 模型載入失敗（所有後端均無法初始化） |
 
 ---
 
@@ -321,6 +333,7 @@ HTTP Request
 [InspectionManager]  單例，asyncio.Lock 序列化
     │
     ├─ registry 查詢 → 取得 adapter class
+    ├─ kwargs 驗證（adapter.accepted_kwargs()）→ 非法欄位回 422
     ├─ 若需切換：unload 舊 adapter → load 新 adapter
     │   └─ TRT 失敗時自動降級 OpenVINO
     │
@@ -341,6 +354,7 @@ HTTP 200 JSON
 
 - **單一 Adapter 駐留**：同時只載入一個模型，節省 GPU/CPU 記憶體，切換時自動 unload
 - **自動降級**：TRT 初始化失敗時，自動改用 OpenVINO，不中斷服務
+- **欄位驗證由 Adapter 自聲明**：每個 adapter 透過 `accepted_kwargs()` 宣告接受的請求欄位，router 統一驗證，新增 adapter 不需修改 router
 - **Submodule 隔離**：`keenchic/inspections/ocr/` 為 git submodule，gateway 只透過 adapter 呼叫，不直接修改
 - **結構化日誌**：每個請求綁定 `request_id`，便於追蹤
 
@@ -356,6 +370,12 @@ from keenchic.inspections.base import InspectionAdapter
 from keenchic.inspections.result_codes import InspectionResultCode
 
 class MyFeatureAdapter(InspectionAdapter):
+
+    @classmethod
+    def accepted_kwargs(cls) -> set[str]:
+        # 宣告此 adapter 接受哪些 request 欄位（router 據此驗證，多傳回 422）
+        return {"include_diag", "my_custom_param"}
+
     def load_models(self, backend: str) -> None: ...
     def unload_models(self) -> None: ...
     def run(self, image, **kwargs) -> dict:
@@ -373,3 +393,5 @@ class MyFeatureAdapter(InspectionAdapter):
 ```
 
 3. 若有新的回應欄位，更新 `keenchic/schemas/response.py`。
+
+> `accepted_kwargs()` 預設回傳 `{"include_diag"}`，所有 adapter 皆可接受診斷圖請求。若 adapter 不需要額外欄位，可省略覆寫。
