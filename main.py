@@ -22,6 +22,34 @@ log = structlog.get_logger(__name__)
 async def lifespan(app: FastAPI):
     configure_logging(settings.LOG_FORMAT, settings.LOG_LEVEL)
     log.info("app.startup", log_format=settings.LOG_FORMAT, log_level=settings.LOG_LEVEL)
+    
+    if settings.KEENCHIC_EDITION == "taimide":
+        template_dir_str = (settings.KEENCHIC_TAIMIDE_TEMPLATE_DIR or "").strip()
+        if not template_dir_str:
+            raise RuntimeError("KEENCHIC_TAIMIDE_TEMPLATE_DIR is required for taimide edition")
+        
+        from pathlib import Path
+        template_dir = Path(template_dir_str)
+        if not template_dir.is_dir():
+            raise RuntimeError(f"KEENCHIC_TAIMIDE_TEMPLATE_DIR is not a valid directory: {template_dir_str}")
+            
+        upload_dir_str = (settings.KEENCHIC_TAIMIDE_UPLOAD_DIR or "").strip()
+        if not upload_dir_str:
+            raise RuntimeError("KEENCHIC_TAIMIDE_UPLOAD_DIR is required for taimide edition")
+            
+        upload_dir = Path(upload_dir_str)
+        try:
+            (upload_dir / "photos").mkdir(parents=True, exist_ok=True)
+            (upload_dir / "reports").mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to create Taimide upload directories: {exc}") from exc
+            
+        log.info(
+            "taimide.startup_configured",
+            template_dir=str(template_dir),
+            upload_dir=str(upload_dir),
+        )
+
     yield
     log.info("app.shutdown")
 
@@ -83,5 +111,10 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 
 app.include_router(router)
+
+if settings.KEENCHIC_EDITION == "taimide":
+    from keenchic.api.taimide_router import taimide_router
+
+    app.include_router(taimide_router)
 
 __all__ = ["app"]

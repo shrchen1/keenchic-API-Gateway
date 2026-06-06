@@ -12,19 +12,8 @@
   - [快速開始](#快速開始)
   - [環境變數](#環境變數)
   - [啟動方式](#啟動方式)
-    - [使用 serve.py（推薦）](#使用-servepy推薦)
-    - [使用 entry point](#使用-entry-point)
-    - [使用 uvicorn（進階）](#使用-uvicorn進階)
   - [API 文件](#api-文件)
-    - [GET /health](#get-health)
-    - [POST /api/v1/inspect](#post-apiv1inspect)
-    - [Result Code 對照表](#result-code-對照表)
-    - [Inspection 清單與回應欄位](#inspection-清單與回應欄位)
-      - [`ocr/datecode-num` — 日期碼 OCR](#ocrdatecode-num--日期碼-ocr)
-      - [`ocr/holo-num` — 全息數字 OCR](#ocrholo-num--全息數字-ocr)
-      - [`ocr/pill-count` — 藥丸計數](#ocrpill-count--藥丸計數)
-      - [`ocr/temper-num` — 溫度 / 有效期 OCR](#ocrtemper-num--溫度--有效期-ocr)
-      - [`ocr/meter-table` — 多通道溫度表格 OCR](#ocrmeter-table--多通道溫度表格-ocr)
+  - [Taimide 定制版](#taimide-定制版)
   - [架構說明](#架構說明)
   - [Wheel 打包（Jetson 部署）](#wheel-打包jetson-部署)
   - [新增 Adapter](#新增-adapter)
@@ -71,6 +60,9 @@ curl http://localhost:8000/health
 | `KEENCHIC_API_KEY` | 是 | — | 所有受保護端點的靜態 API 金鑰，透過 `X-API-KEY` header 驗證 |
 | `KEENCHIC_BACKEND` | 否 | `GPU` | 推理後端：`GPU`（TRT 優先，失敗自動降級 OpenVINO）、`CPU`（OpenVINO）、`AUTO`（同 GPU） |
 | `KEENCHIC_UPLOAD_DIR` | 否 | 空（停用） | 上傳影像的儲存目錄；留空表示不儲存 |
+| `KEENCHIC_EDITION` | 否 | `standard` | 執行版本：`standard`（標準版）或 `taimide`（Taimide 定制版） |
+| `KEENCHIC_TAIMIDE_TEMPLATE_DIR` | 是（Taimide版） | — | Taimide 專用：包含樣版檔案（.xlsx 與 .json）的目錄絕對路徑 |
+| `KEENCHIC_TAIMIDE_UPLOAD_DIR` | 是（Taimide版） | — | Taimide 專用：上傳檔案儲存根目錄（自動建 photos/ 與 reports/ 子目錄） |
 | `LOG_FORMAT` | 否 | `text` | 日誌格式：`text`（人類可讀）或 `json`（結構化，適合 log aggregator） |
 | `LOG_LEVEL` | 否 | `INFO` | 日誌等級：`DEBUG` / `INFO` / `WARNING` / `ERROR` |
 
@@ -87,8 +79,13 @@ uv run python serve.py [選項]
 | 選項 | 預設值 | 說明 |
 |---|---|---|
 | `--backend {gpu,cpu,auto}` | 讀取 `KEENCHIC_BACKEND` | 覆蓋環境變數設定 |
+| `--edition {standard,taimide}` | 讀取 `KEENCHIC_EDITION` | 覆蓋環境變數設定 |
+| `--env-file ENV_FILE` | `None` | 指定自訂的環境設定檔路徑，覆蓋預設的 `.env` |
+| `--log-level {debug,info,warning,error}` | 讀取 `LOG_LEVEL` | 覆蓋環境變數設定 |
+| `--log-format {text,json}` | 讀取 `LOG_FORMAT` | 覆蓋環境變數設定 |
 | `--host HOST` | `0.0.0.0` | 綁定 IP |
 | `--port PORT` | `8000` | 綁定埠號 |
+
 
 範例：
 
@@ -136,6 +133,7 @@ uv run uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
 ```json
 {
   "status": "ok",
+  "edition": "standard",
   "loaded_inspection": "ocr/datecode-num",
   "backend": "openvino"
 }
@@ -144,6 +142,7 @@ uv run uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
 | 欄位 | 說明 |
 |---|---|
 | `status` | 固定為 `"ok"` |
+| `edition` | 目前的 edition（`standard` 或 `taimide`） |
 | `loaded_inspection` | 目前載入的 inspection 名稱；未載入時為 `null` |
 | `backend` | 目前使用的推理後端（`tensorrt` / `openvino`） |
 
@@ -360,6 +359,104 @@ curl -X POST http://localhost:8000/api/v1/inspect \
 
 ---
 
+## Taimide Edition 定制版
+
+當 `KEENCHIC_EDITION=taimide` 時，閘道會載入 Taimide 專屬的路由模組，並提供以下 API 端點。在標準版模式下，這些端點將無法存取（回傳 404）。
+
+### 專屬 API 端點
+
+#### 1. 列出可用樣版
+- **Method & Path**: `GET /api/taimide/v1/templates`
+- **Authentication**: 需 `X-API-KEY` header 認證。
+- **說明**: 掃描 `KEENCHIC_TAIMIDE_TEMPLATE_DIR` 下的所有 `.xlsx` 與 `.json` 檔案。
+- **回應範例 (200 OK)**:
+  ```json
+  {
+    "files": [
+      {
+        "filename": "inspection_template.xlsx",
+        "size_bytes": 1048576
+      },
+      {
+        "filename": "metadata.json",
+        "size_bytes": 512
+      }
+    ]
+  }
+  ```
+
+#### 2. 下載樣版檔案
+- **Method & Path**: `GET /api/taimide/v1/templates/{filename}`
+- **Authentication**: 需 `X-API-KEY` header 認證。
+- **說明**: 下載指定的樣版檔案。具備完整的 Path Traversal 防護。
+
+#### 3. 上傳完整照片
+- **Method & Path**: `POST /api/taimide/v1/photos`
+- **Authentication**: 需 `X-API-KEY` header 認證。
+- **Request (multipart/form-data)**:
+  - `file`: 完整受檢測物件照片，限 `.jpg`, `.jpeg`, `.png`, `.webp`，上限 10 MB。
+- **說明**: 上傳非裁切的完整照片，儲存於 `KEENCHIC_TAIMIDE_UPLOAD_DIR/photos/`，檔名自動採用時戳與隨機 UUID 前綴格式。
+- **回應範例 (201 Created)**:
+  ```json
+  {
+    "filename": "20260606-153022-500-a1b2c3d4-inspection_photo.png",
+    "size_bytes": 2048576,
+    "saved_to": "photos"
+  }
+  ```
+
+#### 4. 上傳 Excel 檢測報告
+- **Method & Path**: `POST /api/taimide/v1/reports`
+- **Authentication**: 需 `X-API-KEY` header 認證。
+- **Request (multipart/form-data)**:
+
+  | 欄位 | 類型 | 必填 | 說明 |
+  |------|------|------|------|
+  | `file` | file | 是 | 填寫完的 Excel 檢測報告，限 `.xlsx` 格式，上限 10 MB |
+  | `batch_number` | string | 是 | 批號，英數字、`-`、`_`，1–50 字元 |
+
+- **說明**: 上傳填寫完的 Excel 報告，儲存於 `KEENCHIC_TAIMIDE_UPLOAD_DIR/reports/`。檔名格式為 `YYYYMMDD-HHMMSS-<batch_number>-<uuid8>-<safe_name>.xlsx`，其中批號會嵌入檔名中。
+- **回應範例 (201 Created)**:
+  ```json
+  {
+    "filename": "20260606-153200-LOT-2025-001-f5e6d7c8-final_report.xlsx",
+    "batch_number": "LOT-2025-001",
+    "size_bytes": 45120,
+    "saved_to": "reports"
+  }
+  ```
+
+### 啟動生命週期驗證
+
+為確保定制版服務正常，啟動時（FastAPI Lifespan）會進行以下檢查：
+1. 檢查 `KEENCHIC_TAIMIDE_TEMPLATE_DIR` 是否已設定且該目錄存在，否則啟動失敗。
+2. 檢查 `KEENCHIC_TAIMIDE_UPLOAD_DIR` 是否已設定，否則啟動失敗。
+3. 自動在 `KEENCHIC_TAIMIDE_UPLOAD_DIR` 底下建立 `photos` 與 `reports` 兩個子目錄（若尚未存在）。
+
+### 與公版的差異
+
+| 功能 | 公版（standard） | 達邁版（taimide） |
+|------|-----------------|------------------|
+| 上傳圖檔保存 | `KEENCHIC_UPLOAD_DIR` 有設才保存 | 透過專屬 API 儲存到 `KEENCHIC_TAIMIDE_UPLOAD_DIR/photos/` |
+| Excel 報告上傳 API | 無 | `POST /api/taimide/v1/reports` |
+| Template 下載 API | 無 | `GET /api/taimide/v1/templates`、`GET /api/taimide/v1/templates/{filename}` |
+| Health 顯示 edition | `"standard"` | `"taimide"` |
+
+### 啟用方式
+
+```bash
+# 方式一：環境變數
+export KEENCHIC_EDITION=taimide
+export KEENCHIC_TAIMIDE_TEMPLATE_DIR=/absolute/path/to/templates
+export KEENCHIC_TAIMIDE_UPLOAD_DIR=/absolute/path/to/taimide_uploads
+uv run python serve.py --backend cpu
+
+# 方式二：CLI 參數
+uv run python serve.py --backend cpu --edition taimide
+```
+
+---
+
 ## 架構說明
 
 ```
@@ -415,8 +512,11 @@ HTTP 200 JSON
 在 Jetson 上執行前需安裝 build 工具：
 
 ```bash
-pip install cython setuptools wheel numpy
+pip install cython setuptools wheel numpy 'tomli; python_version < "3.11"'
 ```
+
+Python 3.11 以上使用標準函式庫 `tomllib`；Jetson 常見的 Python 3.10
+需要安裝相容套件 `tomli`。PyPI 沒有名為 `tomllib` 的套件。
 
 ### 基本用法
 
@@ -424,20 +524,28 @@ pip install cython setuptools wheel numpy
 # 列出所有可打包的算法
 python3 build_wheel.py --list
 
-# 打包全部算法（預設）
+# 打包全部算法（公版，預設）
 python3 build_wheel.py
+
+# 打包全部算法（taimide 版）
+python3 build_wheel.py --edition taimide
 
 # 打包指定算法（可重複 -a）
 python3 build_wheel.py -a ocr/datecode-num
 python3 build_wheel.py -a ocr/datecode-num -a ocr/pill-count
+
+# taimide 版 + 指定算法
+python3 build_wheel.py --edition taimide -a ocr/datecode-num
 ```
 
 ### 產出 wheel 命名規則
 
 | 打包範圍 | wheel 檔名 |
 |---|---|
-| 全部算法 | `keenchic_api_gateway-0.1.0-cp312-cp312-linux_aarch64.whl` |
-| 指定算法子集 | `keenchic_api_gateway-0.1.0+ocr_datecode_num-...-linux_aarch64.whl` |
+| 公版全部算法 | `keenchic_api_gateway-0.1.0-cp312-cp312-linux_aarch64.whl` |
+| 公版指定算法 | `keenchic_api_gateway-0.1.0+ocr_datecode_num-...-linux_aarch64.whl` |
+| Taimide 全部算法 | `keenchic_api_gateway-0.1.0+taimide-...-linux_aarch64.whl` |
+| Taimide 指定算法 | `keenchic_api_gateway-0.1.0+taimide.ocr_datecode_num-...-linux_aarch64.whl` |
 
 子集 build 使用 PEP 440 local version tag 標識所含算法，避免與完整 wheel 衝突。後裝的 wheel 會取代先裝的，無法同時安裝多個版本。
 

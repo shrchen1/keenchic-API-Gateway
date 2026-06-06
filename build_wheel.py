@@ -9,7 +9,7 @@ with each adapter. Adding a new algorithm requires only a new descriptor —
 this file needs no modification.
 
 Usage (on Jetson Orin):
-    pip install cython setuptools wheel numpy
+    pip install cython setuptools wheel numpy 'tomli; python_version < "3.11"'
     python3 build_wheel.py                              # all algorithms
     python3 build_wheel.py --list                       # list available
     python3 build_wheel.py -a ocr/datecode-num          # single algorithm
@@ -27,9 +27,17 @@ import shutil
 import subprocess
 import sys
 import textwrap
-import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError:
+        print("ERROR: tomli not installed. Run: pip install tomli")
+        raise SystemExit(1)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -61,6 +69,7 @@ CORE_KEEP_PY: list[str] = [
     "keenchic/__init__.py",
     "keenchic/core/__init__.py",
     "keenchic/core/config.py",
+    "keenchic/core/file_saver.py",
     "keenchic/api/__init__.py",
     "keenchic/api/router.py",
     "keenchic/schemas/__init__.py",
@@ -69,6 +78,11 @@ CORE_KEEP_PY: list[str] = [
     "keenchic/inspections/adapters/__init__.py",
     "keenchic/inspections/adapters/ocr/__init__.py",
     "keenchic/services/__init__.py",
+]
+
+# Extra files included only in the taimide edition
+TAIMIDE_KEEP_PY: list[str] = [
+    "keenchic/api/taimide_router.py",
 ]
 
 # Runtime dependencies (excluding openvino — not supported on aarch64)
@@ -198,10 +212,12 @@ def select_algorithms(specs: dict[str, AlgoSpec], cli_names: list[str]) -> dict[
     return {n: specs[n] for n in cli_names}
 
 
-def compile_plan(selected: dict[str, AlgoSpec]) -> CompilePlan:
+def compile_plan(selected: dict[str, AlgoSpec], edition: str = "standard") -> CompilePlan:
     """Derive a CompilePlan from the selected AlgoSpecs."""
     keenchic_cython = dict(CORE_CYTHON)
     keep_py = list(CORE_KEEP_PY)
+    if edition == "taimide":
+        keep_py.extend(TAIMIDE_KEEP_PY)
     weight_dirs: list[str] = []
 
     dotted_seen: set[tuple[str, str]] = set()
@@ -434,23 +450,28 @@ def cleanup_staging(plan: CompilePlan) -> None:
     print(f"  Removed {removed} files")
 
 
-def _version_tag(selected_names: list[str], all_names: set[str]) -> str:
-    """Return version string; adds PEP 440 local tag for subset builds."""
-    if set(selected_names) == all_names:
-        return VERSION
+def _version_tag(selected_names: list[str], all_names: set[str], edition: str = "standard") -> str:
+    """Return version string; adds PEP 440 local tag for subset builds or non-standard editions."""
+    parts: list[str] = []
 
-    def slugify(n: str) -> str:
-        return n.replace("/", "_").replace("-", "_")
+    if edition != "standard":
+        parts.append(edition)
 
-    local = ".".join(slugify(n) for n in sorted(selected_names))
-    return f"{VERSION}+{local}"
+    if set(selected_names) != all_names:
+        def slugify(n: str) -> str:
+            return n.replace("/", "_").replace("-", "_")
+        parts.extend(slugify(n) for n in sorted(selected_names))
+
+    if parts:
+        return f"{VERSION}+{'.' .join(parts)}"
+    return VERSION
 
 
-def build_wheel(plan: CompilePlan, selected_names: list[str], all_names: set[str]) -> None:
+def build_wheel(plan: CompilePlan, selected_names: list[str], all_names: set[str], edition: str = "standard") -> None:
     """Generate setup.py for packaging and build the wheel."""
     print("\n[6/6] Building wheel...")
 
-    version = _version_tag(selected_names, all_names)
+    version = _version_tag(selected_names, all_names, edition=edition)
 
     packages = sorted(
         str(init.parent.relative_to(BUILD_DIR)).replace(os.sep, ".")
@@ -537,6 +558,12 @@ def parse_args() -> argparse.Namespace:
         help="Inspection name to include (repeatable). Default: all discovered.",
     )
     p.add_argument(
+        "--edition",
+        choices=["standard", "taimide"],
+        default="standard",
+        help="Build edition: standard (default) or taimide (includes taimide-specific modules).",
+    )
+    p.add_argument(
         "--list",
         action="store_true",
         help="List discovered algorithms and exit.",
@@ -561,17 +588,18 @@ def main() -> None:
     selected = select_algorithms(specs, args.algorithm)
     validate_env()
 
-    print(f"\nBuilding {BASE_PACKAGE_NAME} v{VERSION}")
+    edition = args.edition
+    print(f"\nBuilding {BASE_PACKAGE_NAME} v{VERSION} (edition: {edition})")
     print(f"Algorithms ({len(selected)}): {', '.join(sorted(selected))}")
     print("=" * 60)
 
-    plan = compile_plan(selected)
+    plan = compile_plan(selected, edition=edition)
     copy_to_staging(plan)
     compile_keenchic_modules(plan)
     compile_submodule_dotted(plan)
     compile_submodule_bare(plan)
     cleanup_staging(plan)
-    build_wheel(plan, list(selected), set(specs))
+    build_wheel(plan, list(selected), set(specs), edition=edition)
 
     shutil.rmtree(BUILD_DIR)
 
