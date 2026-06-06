@@ -149,6 +149,10 @@ Type=simple
 User=nvidia
 Environment="KEENCHIC_API_KEY=your-api-key-here"
 Environment="KEENCHIC_BACKEND=GPU"
+# Required when KEENCHIC_EDITION=taimide:
+# Environment="KEENCHIC_EDITION=taimide"
+# Environment="KEENCHIC_TAIMIDE_TEMPLATE_DIR=/absolute/path/to/templates"
+# Environment="KEENCHIC_TAIMIDE_UPLOAD_DIR=/absolute/path/to/taimide_uploads"
 ExecStart=/home/nvidia/keenchic-env/bin/keenchic-serve --port 8000
 Restart=on-failure
 RestartSec=5
@@ -231,5 +235,8 @@ GPU-intensive applications first.
 | `KEENCHIC_API_KEY` | API key for request authentication (required) | `""` |
 | `KEENCHIC_BACKEND` | Inference backend: `GPU`, `CPU`, `AUTO` | `GPU` |
 | `KEENCHIC_UPLOAD_DIR` | Directory to save uploaded images (optional) | not set |
+| `KEENCHIC_EDITION` | Edition: `standard` or `taimide` | `standard` |
+| `KEENCHIC_TAIMIDE_TEMPLATE_DIR` | Absolute path containing templates (required for `taimide`) | not set |
+| `KEENCHIC_TAIMIDE_UPLOAD_DIR` | Base directory for Taimide uploads (required for `taimide`) | not set |
 | `LOG_FORMAT` | Log format: `text` or `json` | `text` |
 | `LOG_LEVEL` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` | `INFO` |

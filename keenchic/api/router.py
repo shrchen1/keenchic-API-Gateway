@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 
 from keenchic.api.deps import require_api_key
 from keenchic.core.config import settings
+from keenchic.core.file_saver import generate_safe_filename, save_file
 from keenchic.core.inspection_manager import inspection_manager
 from keenchic.inspections.registry import get_adapter_class
 from keenchic.schemas.response import InspectResponse
@@ -68,29 +69,13 @@ def _save_upload_if_configured(data: bytes, upload: UploadFile) -> None:
     if not upload_dir:
         return
     try:
-        import uuid
-        from datetime import datetime
-
-        os.makedirs(upload_dir, exist_ok=True)
-        base = os.path.basename(upload.filename or "")
-        name, ext = os.path.splitext(base)
-        if not ext:
-            ctype = getattr(upload, "content_type", "") or ""
-            ext = (
-                ("." + ctype.split("/", 1)[1].lower())
-                if ctype.startswith("image/")
-                else ".jpg"
-            )
-        dt = datetime.utcnow()
-        ts = dt.strftime("%Y%m%d-%H%M%S") + f"-{int(dt.microsecond / 1000):03d}"
-        safe = (
-            "".join(c for c in name if c.isalnum() or c in ("-", "_")).strip()[:50]
-        ) or "upload"
-        filename = f"{ts}-{uuid.uuid4().hex[:8]}-{safe}{ext}"
-        with open(os.path.join(upload_dir, filename), "wb") as f:
-            f.write(data)
+        filename = generate_safe_filename(
+            upload.filename or "upload", getattr(upload, "content_type", None)
+        )
+        save_file(data, upload_dir, filename)
     except Exception as exc:
         log.warning("upload.save_failed", filename=upload.filename, error=str(exc))
+
 
 
 def _normalize_ymd_option(raw: Optional[str]) -> int:
@@ -118,7 +103,7 @@ def _finalize_diag(payload: dict, result: dict, include_diag: bool) -> None:
 def health() -> JSONResponse:
     """Health check — returns current load state. No auth required."""
     status = inspection_manager.get_status()
-    return JSONResponse({"status": "ok", **status})
+    return JSONResponse({"status": "ok", "edition": settings.KEENCHIC_EDITION, **status})
 
 
 @router.post(
