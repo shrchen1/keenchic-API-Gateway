@@ -95,25 +95,17 @@ def test_save_file_writes_data(temp_dirs):
 
 
 def test_generate_taimide_report_filename():
-    fn = generate_taimide_report_filename("日常檢測", "LOT-2025-001", "final_report.xlsx")
-    assert fn.endswith(".xlsx")
-    assert fn.startswith("日常檢測_LOT-2025-001_")
+    # Test safe filename generation preserving extension and removing spaces/specials
+    fn = generate_taimide_report_filename("final report.xlsx")
+    assert fn == "finalreport.xlsx"
 
-    # Format: <inspection_name>_<batch_number>_<datetime>.xlsx
-    name_part = fn.rsplit(".", 1)[0]
-    parts = name_part.split("_")
-    assert len(parts) == 3
-    assert parts[0] == "日常檢測"
-    assert parts[1] == "LOT-2025-001"
+    # Test with Unicode/Chinese characters
+    fn_zh = generate_taimide_report_filename("日常檢測報告.xlsx")
+    assert fn_zh == "日常檢測報告.xlsx"
 
-    dt_part = parts[2]
-    # YYYYMMDD-HHMMSS-mmm -> length is 8 + 1 + 6 + 1 + 3 = 19
-    assert len(dt_part) == 19
-    assert "-" in dt_part
-
-    fn_unsafe = generate_taimide_report_filename("檢測/名稱*?", "LOT/2025", "report_no_ext")
-    assert fn_unsafe.endswith(".xlsx")
-    assert fn_unsafe.startswith("檢測名稱_LOT2025_")
+    # Test unsafe characters and path traversal
+    fn_unsafe = generate_taimide_report_filename("../../unsafe/檢測*?名稱.xlsx")
+    assert fn_unsafe == "檢測名稱.xlsx"
 
 
 # ---------------------------------------------------------------------------
