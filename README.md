@@ -411,15 +411,16 @@ curl -X POST http://localhost:8000/api/v1/inspect \
 - **Request (multipart/form-data)**:
 
   | 欄位 | 類型 | 必填 | 說明 |
-  |------|------|------|------|
-  | `file` | file | 是 | 填寫完的 Excel 檢測報告，限 `.xlsx` 格式，上限 10 MB |
-  | `batch_number` | string | 是 | 批號，英數字、`-`、`_`，1–50 字元 |
+|------|------|------|------|
+| `file` | file | 是 | 填寫完的 Excel 檢測報告，限 `.xlsx` 格式，上限 10 MB |
+| `inspection_name` | string | 是 | 檢測名稱，1–50 字元，須含至少一個英數字或中文字 |
+| `batch_number` | string | 是 | 批號，英數字、`-`、`_`，1–50 字元 |
 
-- **說明**: 上傳填寫完的 Excel 報告，儲存於 `KEENCHIC_TAIMIDE_UPLOAD_DIR/reports/`。檔名格式為 `YYYYMMDD-HHMMSS-<batch_number>-<uuid8>-<safe_name>.xlsx`，其中批號會嵌入檔名中。
+- **說明**: 上傳填寫完的 Excel 報告，儲存於 `KEENCHIC_TAIMIDE_UPLOAD_DIR/reports/`。檔名格式為 `<inspection_name>_<batch_number>_<YYYYMMDD-HHMMSS-mmm>.xlsx`。
 - **回應範例 (201 Created)**:
   ```json
   {
-    "filename": "20260606-153200-LOT-2025-001-f5e6d7c8-final_report.xlsx",
+    "filename": "inspection1_LOT-2025-001_20260606-153200-500.xlsx",
     "batch_number": "LOT-2025-001",
     "size_bytes": 45120,
     "saved_to": "reports"
