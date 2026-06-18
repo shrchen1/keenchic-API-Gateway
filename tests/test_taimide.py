@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from keenchic.core.config import Settings, settings
 from keenchic.core.file_saver import (
     generate_safe_filename,
-    generate_safe_filename_with_batch,
+    generate_taimide_report_filename,
     save_file,
 )
 import main as main_mod
@@ -94,23 +94,26 @@ def test_save_file_writes_data(temp_dirs):
     assert Path(file_path).read_bytes() == b"test-bytes"
 
 
-def test_generate_safe_filename_with_batch():
-    fn = generate_safe_filename_with_batch("final_report.xlsx", "LOT-2025-001")
+def test_generate_taimide_report_filename():
+    fn = generate_taimide_report_filename("日常檢測", "LOT-2025-001", "final_report.xlsx")
     assert fn.endswith(".xlsx")
-    assert "LOT-2025-001" in fn
-    assert "final_report" in fn
-    # Format: YYYYMMDD-HHMMSS-<batch>-<uuid8>-<safe_name>.xlsx
-    parts = fn.rsplit(".", 1)[0].split("-")
-    # Should have at least: date, time, batch parts, uuid, safe_name
-    assert len(parts) >= 5
+    assert fn.startswith("日常檢測_LOT-2025-001_")
 
-    # No millisecond component (unlike generate_safe_filename)
-    # Second part is HHMMSS (6 digits), no '-mmm' following
-    assert len(parts[1]) == 6
+    # Format: <inspection_name>_<batch_number>_<datetime>.xlsx
+    name_part = fn.rsplit(".", 1)[0]
+    parts = name_part.split("_")
+    assert len(parts) == 3
+    assert parts[0] == "日常檢測"
+    assert parts[1] == "LOT-2025-001"
 
-    # Default ext for report without extension
-    fn_no_ext = generate_safe_filename_with_batch("report_no_ext", "BATCH-1")
-    assert fn_no_ext.endswith(".xlsx")
+    dt_part = parts[2]
+    # YYYYMMDD-HHMMSS-mmm -> length is 8 + 1 + 6 + 1 + 3 = 19
+    assert len(dt_part) == 19
+    assert "-" in dt_part
+
+    fn_unsafe = generate_taimide_report_filename("檢測/名稱*?", "LOT/2025", "report_no_ext")
+    assert fn_unsafe.endswith(".xlsx")
+    assert fn_unsafe.startswith("檢測名稱_LOT2025_")
 
 
 # ---------------------------------------------------------------------------
@@ -288,13 +291,15 @@ def test_upload_report_success(taimide_client):
         "/api/taimide/v1/reports",
         headers={"X-API-KEY": "test-key"},
         files={"file": ("final_report.xlsx", report_data, "application/vnd.ms-excel")},
-        data={"batch_number": "LOT-2025-001"},
+        data={"batch_number": "LOT-2025-001", "inspection_name": "日常檢測"},
     )
     assert response.status_code == 201
     res_json = response.json()
     assert "filename" in res_json
     assert "LOT-2025-001" in res_json["filename"]
+    assert "日常檢測" in res_json["filename"]
     assert res_json["batch_number"] == "LOT-2025-001"
+    assert res_json["inspection_name"] == "日常檢測"
     assert res_json["size_bytes"] == len(report_data)
     assert res_json["saved_to"] == "reports"
 
@@ -310,7 +315,7 @@ def test_upload_report_invalid_ext(taimide_client):
         "/api/taimide/v1/reports",
         headers={"X-API-KEY": "test-key"},
         files={"file": ("photo.png", b"png-content", "image/png")},
-        data={"batch_number": "LOT-001"},
+        data={"batch_number": "LOT-001", "inspection_name": "日常檢測"},
     )
     assert response.status_code == 400
     assert "Invalid file extension" in response.json()["detail"]
@@ -322,7 +327,7 @@ def test_upload_report_empty(taimide_client):
         "/api/taimide/v1/reports",
         headers={"X-API-KEY": "test-key"},
         files={"file": ("report.xlsx", b"", "application/vnd.ms-excel")},
-        data={"batch_number": "LOT-001"},
+        data={"batch_number": "LOT-001", "inspection_name": "日常檢測"},
     )
     assert response.status_code == 422
     assert "empty" in response.json()["detail"].lower()
@@ -335,7 +340,7 @@ def test_upload_report_too_large(taimide_client):
         "/api/taimide/v1/reports",
         headers={"X-API-KEY": "test-key"},
         files={"file": ("report.xlsx", large_data, "application/vnd.ms-excel")},
-        data={"batch_number": "LOT-001"},
+        data={"batch_number": "LOT-001", "inspection_name": "日常檢測"},
     )
     assert response.status_code == 413
     assert "exceeds" in response.json()["detail"]
@@ -348,6 +353,7 @@ def test_upload_report_missing_batch_number(taimide_client):
         "/api/taimide/v1/reports",
         headers={"X-API-KEY": "test-key"},
         files={"file": ("report.xlsx", b"data", "application/vnd.ms-excel")},
+        data={"inspection_name": "日常檢測"},
     )
     assert response.status_code == 422
 
@@ -359,7 +365,7 @@ def test_upload_report_invalid_batch_number(taimide_client):
         "/api/taimide/v1/reports",
         headers={"X-API-KEY": "test-key"},
         files={"file": ("report.xlsx", b"data", "application/vnd.ms-excel")},
-        data={"batch_number": "LOT 2025/001!"},
+        data={"batch_number": "LOT 2025/001!", "inspection_name": "日常檢測"},
     )
     assert response.status_code == 422
     assert "invalid characters" in response.json()["detail"].lower()
@@ -372,11 +378,48 @@ def test_upload_report_batch_number_too_long(taimide_client):
         "/api/taimide/v1/reports",
         headers={"X-API-KEY": "test-key"},
         files={"file": ("report.xlsx", b"data", "application/vnd.ms-excel")},
-        data={"batch_number": "A" * 51},
+        data={"batch_number": "A" * 51, "inspection_name": "日常檢測"},
     )
     assert response.status_code == 422
     assert "1" in response.json()["detail"]  # mentions length constraint
 
+
+def test_upload_report_missing_inspection_name(taimide_client):
+    """Omitting inspection_name should be rejected (422)."""
+    client, _, _ = taimide_client
+    response = client.post(
+        "/api/taimide/v1/reports",
+        headers={"X-API-KEY": "test-key"},
+        files={"file": ("report.xlsx", b"data", "application/vnd.ms-excel")},
+        data={"batch_number": "LOT-2025-001"},
+    )
+    assert response.status_code == 422
+
+
+def test_upload_report_inspection_name_too_long(taimide_client):
+    """inspection_name exceeding 50 characters should be rejected (422)."""
+    client, _, _ = taimide_client
+    response = client.post(
+        "/api/taimide/v1/reports",
+        headers={"X-API-KEY": "test-key"},
+        files={"file": ("report.xlsx", b"data", "application/vnd.ms-excel")},
+        data={"batch_number": "LOT-2025-001", "inspection_name": "A" * 51},
+    )
+    assert response.status_code == 422
+    assert "50" in response.json()["detail"]
+
+
+def test_upload_report_inspection_name_no_alnum(taimide_client):
+    """inspection_name with no alphanumeric characters should be rejected (422)."""
+    client, _, _ = taimide_client
+    response = client.post(
+        "/api/taimide/v1/reports",
+        headers={"X-API-KEY": "test-key"},
+        files={"file": ("report.xlsx", b"data", "application/vnd.ms-excel")},
+        data={"batch_number": "LOT-2025-001", "inspection_name": "///***"},
+    )
+    assert response.status_code == 422
+    assert "alphanumeric" in response.json()["detail"].lower()
 
 # ---------------------------------------------------------------------------
 # Tests: taimide startup validation
