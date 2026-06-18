@@ -24,7 +24,7 @@ from keenchic.api.deps import require_api_key
 from keenchic.core.config import settings
 from keenchic.core.file_saver import (
     generate_safe_filename,
-    generate_safe_filename_with_batch,
+    generate_taimide_report_filename,
     save_file,
 )
 
@@ -197,13 +197,27 @@ _BATCH_NUMBER_MAX_LEN = 50
 async def upload_report(
     file: UploadFile = File(..., description="Excel report file to upload"),
     batch_number: str = Form(..., description="Batch number for the report"),
+    inspection_name: str = Form(..., description="Inspection name for the report"),
 ) -> JSONResponse:
     """Upload an Excel report and save it to the reports/ subdirectory.
 
-    The *batch_number* form field is required and will be embedded into the
-    saved filename.  Allowed characters: A-Z, a-z, 0-9, ``-``, ``_``
-    (1–50 chars).
+    The *batch_number* and *inspection_name* form fields are required.
+    *inspection_name* must be 1–50 characters.
+    The saved filename format: <inspection_name>_<batch_number>_<datetime>.xlsx
     """
+    # --- validate inspection_name ----------------------------------------
+    inspection_name = inspection_name.strip()
+    if not inspection_name or len(inspection_name) > 50:
+        raise HTTPException(
+            status_code=422,
+            detail=f"inspection_name must be 1–50 characters, got {len(inspection_name)}",
+        )
+    if not any(c.isalnum() for c in inspection_name):
+        raise HTTPException(
+            status_code=422,
+            detail="inspection_name must contain at least one alphanumeric character",
+        )
+
     # --- validate batch_number -------------------------------------------
     batch_number = batch_number.strip()
     if not batch_number or len(batch_number) > _BATCH_NUMBER_MAX_LEN:
@@ -248,8 +262,8 @@ async def upload_report(
     reports_dir = os.path.join(upload_dir, "reports")
 
     try:
-        filename = generate_safe_filename_with_batch(
-            orig_name, batch_number, getattr(file, "content_type", None),
+        filename = generate_taimide_report_filename(
+            inspection_name, batch_number, orig_name, getattr(file, "content_type", None),
         )
         save_file(data, reports_dir, filename)
     except Exception as exc:
@@ -257,6 +271,7 @@ async def upload_report(
             "taimide.report_upload_failed",
             filename=orig_name,
             batch_number=batch_number,
+            inspection_name=inspection_name,
             error=str(exc),
         )
         raise HTTPException(status_code=500, detail="Failed to save report") from exc
@@ -265,12 +280,14 @@ async def upload_report(
         "taimide.report_saved",
         filename=filename,
         batch_number=batch_number,
+        inspection_name=inspection_name,
         size_bytes=len(data),
     )
     return JSONResponse(
         {
             "filename": filename,
             "batch_number": batch_number,
+            "inspection_name": inspection_name,
             "size_bytes": len(data),
             "saved_to": "reports",
         },

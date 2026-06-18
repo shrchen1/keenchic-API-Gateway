@@ -254,7 +254,7 @@ HTTP POST /api/v1/inspect
 透過 `KEENCHIC_EDITION=taimide`（或 `--edition taimide`）啟用達邁定制版功能：
 
 - **樣版檔案管理**：列出與下載樣版檔案（`GET /api/taimide/v1/templates` 與 `GET /api/taimide/v1/templates/{filename}`）。
-- **專屬上傳 API**：分別上傳完整照片（`POST /api/taimide/v1/photos`）與 Excel 報告（`POST /api/taimide/v1/reports`，必填 `batch_number` 批號）。
+- **專屬上傳 API**：分別上傳完整照片（`POST /api/taimide/v1/photos`）與 Excel 報告（`POST /api/taimide/v1/reports`，必填 `inspection_name` 檢測名稱與 `batch_number` 批號）。
 
 ### 相關檔案
 
@@ -295,7 +295,7 @@ python3 build_wheel.py --edition taimide -a ocr/datecode-num # taimide 單算法
 - `POST /api/taimide/v1/photos`
   - 上傳未裁切的完整照片，限 `.jpg`, `.jpeg`, `.png`, `.webp` 格式，上限 10 MB。儲存於 `KEENCHIC_TAIMIDE_UPLOAD_DIR/photos/`。
 - `POST /api/taimide/v1/reports`
-  - 上傳已填寫的 Excel 檢測報告，限 `.xlsx` 格式，上限 10 MB。必填 `batch_number`（英數字、`-`、`_`，1–50 字元），批號會嵌入儲存檔名。儲存於 `KEENCHIC_TAIMIDE_UPLOAD_DIR/reports/`。
+  - 上傳已填寫的 Excel 檢測報告，限 `.xlsx` 格式，上限 10 MB。必填 `inspection_name`（1–50 字元，須含至少一個英數字或中文字，可包含特殊符號）與 `batch_number`（英數字、`-`、`_`，1–50 字元）。儲存檔名格式為 `<inspection_name>_<batch_number>_<YYYYMMDD-HHMMSS-mmm>.xlsx`。儲存於 `KEENCHIC_TAIMIDE_UPLOAD_DIR/reports/`。
 
 ### 啟動驗證與自動建立目錄
 
