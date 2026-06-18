@@ -422,6 +422,7 @@ curl -X POST http://localhost:8000/api/v1/inspect \
   {
     "filename": "inspection1_LOT-2025-001_20260606-153200-500.xlsx",
     "batch_number": "LOT-2025-001",
+    "inspection_name": "inspection1",
     "size_bytes": 45120,
     "saved_to": "reports"
   }
