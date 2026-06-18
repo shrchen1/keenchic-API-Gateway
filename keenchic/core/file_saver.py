@@ -42,17 +42,12 @@ def save_file(data: bytes, directory: str, filename: str) -> str:
 
 
 def generate_taimide_report_filename(
-    inspection_name: str,
-    batch_number: str,
     original_name: str,
     content_type: str | None = None,
 ) -> str:
-    """Generate a safe filename for Taimide report.
-
-    Format: <inspection_name>_<batch_number>_<YYYYMMDD-HHMMSS-mmm>.<ext>
-    """
+    """Generate a safe filename for Taimide report without timestamp or metadata."""
     base = os.path.basename(original_name or "")
-    _, ext = os.path.splitext(base)
+    name, ext = os.path.splitext(base)
     if not ext and content_type:
         ext = (
             ("." + content_type.split("/", 1)[1].lower())
@@ -66,16 +61,10 @@ def generate_taimide_report_filename(
     if not ext.startswith("."):
         ext = "." + ext
 
-    dt = datetime.now(timezone.utc)
-    ts = dt.strftime("%Y%m%d-%H%M%S") + f"-{int(dt.microsecond / 1000):03d}"
+    # Clean variables to make them safe for filesystem, keeping alphanumeric and Chinese/Unicode characters
+    safe_name = "".join(c for c in name if c.isalnum() or c in ("-", "_")).strip()[:100]
 
-    # Clean variables to make them safe for filesystem, keeping alphanumeric and chinese characters
-    safe_inspection = "".join(c for c in inspection_name if c.isalnum() or c in ("-", "_")).strip()[:50]
-    safe_batch = "".join(c for c in batch_number if c.isalnum() or c in ("-", "_")).strip()[:50]
+    if not safe_name:
+        safe_name = "report"
 
-    if not safe_inspection:
-        safe_inspection = "report"
-    if not safe_batch:
-        safe_batch = "batch"
-
-    return f"{safe_inspection}_{safe_batch}_{ts}{ext}"
+    return f"{safe_name}{ext}"

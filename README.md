@@ -413,16 +413,12 @@ curl -X POST http://localhost:8000/api/v1/inspect \
   | 欄位 | 類型 | 必填 | 說明 |
 |------|------|------|------|
 | `file` | file | 是 | 填寫完的 Excel 檢測報告，限 `.xlsx` 格式，上限 10 MB |
-| `inspection_name` | string | 是 | 檢測名稱，1–50 字元，須含至少一個英數字或中文字 |
-| `batch_number` | string | 是 | 批號，英數字、`-`、`_`，1–50 字元 |
 
-- **說明**: 上傳填寫完的 Excel 報告，儲存於 `KEENCHIC_TAIMIDE_UPLOAD_DIR/reports/`。檔名格式為 `<inspection_name>_<batch_number>_<YYYYMMDD-HHMMSS-mmm>.xlsx`。
+- **說明**: 上傳填寫完的 Excel 報告，儲存於 `KEENCHIC_TAIMIDE_UPLOAD_DIR/reports/`。檔名直接從 `file.filename` 取得並進行安全消毒（保留中文字元、英數字、`-`、`_`，其餘字元過濾），不加上時間戳記或隨機碼，若重複則直接覆寫。
 - **回應範例 (201 Created)**:
   ```json
   {
-    "filename": "inspection1_LOT-2025-001_20260606-153200-500.xlsx",
-    "batch_number": "LOT-2025-001",
-    "inspection_name": "inspection1",
+    "filename": "final_report.xlsx",
     "size_bytes": 45120,
     "saved_to": "reports"
   }
