@@ -56,7 +56,7 @@ def configure_logging(log_format: str, log_level: str) -> None:
         wrapper_class=structlog.make_filtering_bound_logger(log_level_int),
         context_class=dict,
         logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=True,
+        cache_logger_on_first_use=False,
     )
 
 

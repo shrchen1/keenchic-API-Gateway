@@ -55,6 +55,7 @@ DESCRIPTOR_GLOB = "keenchic/inspections/adapters/**/*.build.toml"
 # Core modules always included regardless of algorithm selection
 CORE_CYTHON: dict[str, str] = {
     "keenchic.core.inspection_manager": "keenchic/core/inspection_manager.py",
+    "keenchic.core.http_logging":       "keenchic/core/http_logging.py",
     "keenchic.core.logging":            "keenchic/core/logging.py",
     "keenchic.inspections.base":        "keenchic/inspections/base.py",
     "keenchic.inspections.registry":    "keenchic/inspections/registry.py",
