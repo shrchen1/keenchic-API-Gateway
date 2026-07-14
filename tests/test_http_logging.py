@@ -8,9 +8,11 @@ from unittest.mock import AsyncMock
 
 import numpy as np
 import pytest
+import structlog
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.testclient import TestClient
+from starlette.types import Message, Receive, Scope, Send
 
 import keenchic.api.router as standard_router_module
 import keenchic.core.http_logging as http_logging
@@ -117,8 +119,8 @@ def test_debug_json_logs_sanitized_request_and_response_payloads(
 
     assert response.status_code == 200
     events = _json_events(capsys)
-    request_event = _event(events, "http.request_payload", "/echo")
-    response_event = _event(events, "http.response_payload")
+    request_event = _event(events, "http.request", "/echo")
+    response_event = _event(events, "http.response", "/echo")
 
     assert request_event["query"] == {
         "token": REDACTED,
@@ -135,17 +137,14 @@ def test_debug_json_logs_sanitized_request_and_response_payloads(
     assert request_event["payload"]["preview"] == REDACTED_IMAGE
     assert response_event["payload"]["password"] == REDACTED
     assert response_event["payload"]["diag_img"] == REDACTED_IMAGE
+    assert response_event["method"] == "POST"
+    assert response_event["inspection_name"] == "ocr/pill-count"
     correlated_events = [
         event
         for event in events
-        if event.get("event")
-        in {
-            "http.request",
-            "http.request_payload",
-            "http.response_payload",
-            "http.response",
-        }
+        if event.get("event") in {"http.request", "http.response"}
     ]
+    assert len(correlated_events) == 2
     assert len({event["request_id"] for event in correlated_events}) == 1
 
     serialized_events = json.dumps(events, ensure_ascii=False)
@@ -169,12 +168,8 @@ def test_debug_text_payload_events_are_single_line_and_sanitized(
 
     assert response.status_code == 200
     output = capsys.readouterr().out
-    request_lines = [
-        line for line in output.splitlines() if "http.request_payload" in line
-    ]
-    response_lines = [
-        line for line in output.splitlines() if "http.response_payload" in line
-    ]
+    request_lines = [line for line in output.splitlines() if "http.request" in line]
+    response_lines = [line for line in output.splitlines() if "http.response" in line]
     assert len(request_lines) == 1
     assert len(response_lines) == 1
     assert "text-secret" not in output
@@ -191,9 +186,41 @@ def test_info_logs_summaries_without_payload_events(
 
     assert response.status_code == 200
     events = _json_events(capsys)
-    assert any(event.get("event") == "http.request" for event in events)
-    assert any(event.get("event") == "http.response" for event in events)
-    assert not any("payload" in str(event.get("event")) for event in events)
+    request_event = _event(events, "http.request", "/echo")
+    response_event = _event(events, "http.response", "/echo")
+    assert "payload" not in request_event
+    assert "headers" not in request_event
+    assert "payload" not in response_event
+    assert "headers" not in response_event
+
+
+def test_access_log_precedes_grouped_request_and_response_events(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app = _make_app("DEBUG")
+
+    async def access_log_wrapper(
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+    ) -> None:
+        async def send_with_access_log(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                structlog.get_logger("uvicorn.access").info("uvicorn.access")
+            await send(message)
+
+        await app(scope, receive, send_with_access_log)
+
+    client = TestClient(access_log_wrapper)
+    assert client.get("/health").status_code == 200
+
+    events = _json_events(capsys)
+    lifecycle_events = [
+        event["event"]
+        for event in events
+        if event.get("event") in {"uvicorn.access", "http.request", "http.response"}
+    ]
+    assert lifecycle_events == ["uvicorn.access", "http.request", "http.response"]
 
 
 def test_debug_lifespan_warns_that_payload_logging_is_enabled(
@@ -240,10 +267,8 @@ def test_debug_logs_health_and_error_statuses_but_excludes_docs(
     assert client.get("/openapi.json").status_code == 200
 
     events = _json_events(capsys)
-    request_payload_paths = {
-        event["path"]
-        for event in events
-        if event.get("event") == "http.request_payload"
+    request_events = {
+        event["path"]: event for event in events if event.get("event") == "http.request"
     }
     assert {
         "/health",
@@ -251,16 +276,23 @@ def test_debug_logs_health_and_error_statuses_but_excludes_docs(
         "/validated",
         "/missing",
         "/fail",
-    } <= request_payload_paths
-    assert "/docs" not in request_payload_paths
-    assert "/openapi.json" not in request_payload_paths
+        "/docs",
+        "/openapi.json",
+    } <= request_events.keys()
+    assert "headers" in request_events["/health"]
+    assert "headers" not in request_events["/docs"]
+    assert "headers" not in request_events["/openapi.json"]
 
     response_statuses = {
         event["status_code"]
         for event in events
-        if event.get("event") == "http.response_payload"
+        if event.get("event") == "http.response"
     }
-    assert {200, 401, 404, 422, 500} <= response_statuses
+    assert {200, 401, 404, 422} <= response_statuses
+    assert any(
+        event.get("event") == "http.error" and event.get("status_code") == 500
+        for event in events
+    )
 
 
 def test_form_and_multipart_logs_preserve_values_and_omit_file_bytes(
@@ -283,9 +315,7 @@ def test_form_and_multipart_logs_preserve_values_and_omit_file_bytes(
     assert form_response.json() == {"item_count": 3}
     assert multipart_response.json() == {"item_count": 3}
     events = _json_events(capsys)
-    request_events = [
-        event for event in events if event.get("event") == "http.request_payload"
-    ]
+    request_events = [event for event in events if event.get("event") == "http.request"]
     assert request_events[0]["payload"] == {
         "tag": ["first", "second"],
         "password": REDACTED,
@@ -325,11 +355,11 @@ def test_unknown_request_and_streaming_response_log_metadata_only(
     assert binary_response.content == b"request-binary-secret"
     assert stream_response.content == b"stream-binary-secret"
     events = _json_events(capsys)
-    binary_request = _event(events, "http.request_payload", "/binary")
+    binary_request = _event(events, "http.request", "/binary")
     stream_response_event = next(
         event
         for event in events
-        if event.get("event") == "http.response_payload"
+        if event.get("event") == "http.response"
         and event.get("content_type") == "application/octet-stream"
         and event.get("body_size_bytes") == len(b"stream-binary-secret")
     )
@@ -423,8 +453,8 @@ def test_standard_inspect_logs_file_metadata_and_sanitized_result(
     assert response.status_code == 200
     run_inspection.assert_awaited_once()
     events = _json_events(capsys)
-    request_event = _event(events, "http.request_payload", "/api/v1/inspect")
-    response_event = _event(events, "http.response_payload")
+    request_event = _event(events, "http.request", "/api/v1/inspect")
+    response_event = _event(events, "http.response", "/api/v1/inspect")
     assert request_event["payload"]["files"] == [
         {
             "field_name": "image",
@@ -483,7 +513,7 @@ def test_taimide_upload_and_download_log_metadata_without_binary(
     events = _json_events(capsys)
     upload_event = _event(
         events,
-        "http.request_payload",
+        "http.request",
         "/api/taimide/v1/reports",
     )
     assert upload_event["payload"]["files"][0] == {
@@ -495,7 +525,7 @@ def test_taimide_upload_and_download_log_metadata_without_binary(
     download_event = next(
         event
         for event in events
-        if event.get("event") == "http.response_payload"
+        if event.get("event") == "http.response"
         and event.get("content_type")
         == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )

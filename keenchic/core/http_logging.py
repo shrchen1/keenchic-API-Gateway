@@ -6,6 +6,7 @@ import tempfile
 import time
 import uuid
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from datetime import datetime, timezone
 from typing import Any, BinaryIO
 from urllib.parse import parse_qsl
 
@@ -145,14 +146,16 @@ class HttpLoggingMiddleware:
 
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(request_id=request_id)
-        log.info(
-            "http.request",
-            method=method,
-            path=path,
-            inspection_name=inspection_name,
-        )
-
         start = time.monotonic()
+        request_fields: dict[str, Any] = {
+            "method": method,
+            "path": path,
+            "inspection_name": inspection_name,
+            "received_at": datetime.now(timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z"),
+        }
+        request_capture_error_type: str | None = None
         request_spool: BinaryIO | None = None
         response_capture = _ResponseCapture(enabled=capture_payload)
         try:
@@ -164,13 +167,17 @@ class HttpLoggingMiddleware:
                 )
                 body_complete = await _spool_request_body(receive, request_spool)
                 try:
-                    await self._log_request_payload(
+                    (
+                        request_details,
+                        request_capture_error_type,
+                    ) = await self._capture_request_payload(
                         scope,
                         request_headers,
                         request_spool,
                     )
+                    request_fields.update(request_details)
                 except Exception as exc:
-                    _log_capture_failure("request", exc)
+                    request_capture_error_type = type(exc).__name__
                     request_spool.seek(0)
                 app_receive = _request_replay(
                     request_spool,
@@ -183,18 +190,36 @@ class HttpLoggingMiddleware:
                 app_receive,
                 response_capture.wrap_send(send),
             )
-            if capture_payload:
-                response_capture.log_payload()
-            log.info(
-                "http.response",
-                status_code=response_capture.status_code,
-                duration_ms=_duration_ms(start),
+            response_fields, response_capture_error_type = (
+                response_capture.finalize_fields()
             )
+            log.info("http.request", **request_fields)
+            if request_capture_error_type is not None:
+                _log_capture_failure("request", request_capture_error_type)
+
+            response_fields.update(
+                {
+                    "method": method,
+                    "path": path,
+                    "inspection_name": inspection_name,
+                    "duration_ms": _duration_ms(start),
+                }
+            )
+            if response_capture_error_type is not None:
+                _log_capture_failure("response", response_capture_error_type)
+            log.info("http.response", **response_fields)
         except Exception as exc:
-            if capture_payload:
-                response_capture.log_payload(default_status=500)
+            _, response_capture_error_type = response_capture.finalize_fields()
+            log.info("http.request", **request_fields)
+            if request_capture_error_type is not None:
+                _log_capture_failure("request", request_capture_error_type)
+            if response_capture_error_type is not None:
+                _log_capture_failure("response", response_capture_error_type)
             log.error(
                 "http.error",
+                method=method,
+                path=path,
+                inspection_name=inspection_name,
                 status_code=500,
                 duration_ms=_duration_ms(start),
                 error=str(exc),
@@ -205,33 +230,32 @@ class HttpLoggingMiddleware:
                 request_spool.close()
             structlog.contextvars.clear_contextvars()
 
-    async def _log_request_payload(
+    async def _capture_request_payload(
         self,
         scope: Scope,
         headers: Headers,
         spool: BinaryIO,
-    ) -> None:
+    ) -> tuple[dict[str, Any], str | None]:
         body_size = _spool_size(spool)
         media_type = _media_type(headers.get("content-type"))
         event_fields: dict[str, Any] = {
-            "method": scope.get("method", ""),
-            "path": scope.get("path", ""),
             "query": sanitize_payload(_query_fields(scope)),
             "headers": _allowlisted_headers(headers, _REQUEST_HEADER_ALLOWLIST),
             "content_type": media_type or None,
             "body_size_bytes": body_size,
         }
+        error_type: str | None = None
 
         try:
             payload = await _parse_request_payload(headers, spool, media_type)
             if payload is not None:
                 event_fields.update(payload_log_fields(payload))
         except Exception as exc:
-            _log_capture_failure("request", exc)
+            error_type = type(exc).__name__
         finally:
             spool.seek(0)
 
-        log.debug("http.request_payload", **event_fields)
+        return event_fields, error_type
 
 
 class _ResponseCapture:
@@ -268,35 +292,35 @@ class _ResponseCapture:
 
         return send_wrapper
 
-    def log_payload(self, default_status: int | None = None) -> None:
-        if not self.enabled or self._logged:
-            return
+    def finalize_fields(self) -> tuple[dict[str, Any], str | None]:
+        if self._logged:
+            return {"status_code": self.status_code}, None
         self._logged = True
+        event_fields: dict[str, Any] = {"status_code": self.status_code}
+        error_type: str | None = None
         try:
-            if default_status is not None and self.status_code == 500:
-                self.status_code = default_status
-
-            media_type = _media_type(self.headers.get("content-type"))
-            event_fields: dict[str, Any] = {
-                "status_code": self.status_code,
-                "headers": _allowlisted_headers(
-                    self.headers,
-                    _RESPONSE_HEADER_ALLOWLIST,
-                ),
-                "content_type": media_type or None,
-                "body_size_bytes": self.body_size_bytes,
-            }
-            if self._capture_json and self.body is not None:
-                self.body.seek(0)
-                payload = json.loads(self.body.read().decode("utf-8"))
-                event_fields.update(payload_log_fields(payload))
-
-            log.debug("http.response_payload", **event_fields)
+            if self.enabled:
+                media_type = _media_type(self.headers.get("content-type"))
+                event_fields.update(
+                    {
+                        "headers": _allowlisted_headers(
+                            self.headers,
+                            _RESPONSE_HEADER_ALLOWLIST,
+                        ),
+                        "content_type": media_type or None,
+                        "body_size_bytes": self.body_size_bytes,
+                    }
+                )
+                if self._capture_json and self.body is not None:
+                    self.body.seek(0)
+                    payload = json.loads(self.body.read().decode("utf-8"))
+                    event_fields.update(payload_log_fields(payload))
         except Exception as exc:
-            _log_capture_failure("response", exc)
+            error_type = type(exc).__name__
         finally:
             if self.body is not None:
                 self.body.close()
+        return event_fields, error_type
 
 
 async def _spool_request_body(receive: Receive, spool: BinaryIO) -> bool:
@@ -518,11 +542,11 @@ def _duration_ms(start: float) -> float:
     return round((time.monotonic() - start) * 1000, 1)
 
 
-def _log_capture_failure(phase: str, exc: Exception) -> None:
+def _log_capture_failure(phase: str, error_type: str) -> None:
     log.warning(
         "http.payload_capture_failed",
         phase=phase,
-        error_type=type(exc).__name__,
+        error_type=error_type,
     )
 
 
