@@ -12,6 +12,7 @@
   - [快速開始](#快速開始)
   - [環境變數](#環境變數)
   - [啟動方式](#啟動方式)
+  - [DEBUG HTTP payload 日誌](#debug-http-payload-日誌)
   - [API 文件](#api-文件)
   - [Taimide 定制版](#taimide-定制版)
   - [架構說明](#架構說明)
@@ -112,6 +113,25 @@ uv run uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
 ```
 
 > **注意**：因模型為單例且不可分享跨 process，`--workers` 必須為 `1`。
+
+---
+
+## DEBUG HTTP payload 日誌
+
+將 `LOG_LEVEL` 設為 `DEBUG` 時，standard 與 Taimide edition 都會將 sanitized HTTP request／response payload 併入 `http.request` 與 `http.response` 單行 event，並輸出至 stdout。一般已完成的 request 會先輸出 Uvicorn access log，再依序輸出 `http.request` 與 `http.response`；Uvicorn access log 會保留。啟動時會額外輸出一次 `payload_logging.enabled` warning，提醒目前已啟用 payload logging。`LOG_FORMAT=text` 與 `LOG_FORMAT=json` 都支援此功能。
+
+DEBUG request event 包含 method、path、query、allowlist headers 與可安全解析的 body；response event 包含 status、allowlist headers 與 JSON body。支援解析的 request media type 為 JSON、URL-encoded form 與 multipart。Multipart file 只記錄 `field_name`、`filename`、`content_type`、`size_bytes`，不記錄 Excel、圖片或其他檔案 bytes；非 JSON response 也只記錄 metadata。
+
+安全處理規則：
+
+- Credential-like 欄位會遞迴替換為 `[REDACTED]`。
+- `diag_img`、`diag_img_en`、image Base64 與 image data URI 會替換為 `[REDACTED_IMAGE]`。
+- Request header 只允許 `Content-Type`、`Content-Length`、`X-Inspection-Name`、`User-Agent`；`X-API-KEY` 不會輸出。
+- Response header 只允許 `Content-Type`、`Content-Length`、`Content-Disposition`。
+- Sanitized payload serialized size 超過 256 KiB 時，只輸出 preview，並附上 `truncated=true` 與 `original_size_bytes`。
+- `/docs` 及其子路徑、`/redoc` 及其子路徑、`/openapi.json` 只輸出 request／response summary，不加入 payload fields。
+
+`INFO` 以上維持 request／response summary 行為，不加入 payload fields。不同 client 的併發 request 仍可能在 stdout 互相穿插，應使用 `request_id` 做 correlation；系統不會為了 log 排版而序列化 request。未捕捉例外由 Uvicorn 在 middleware 重新拋出後產生 500 access log，因此不保證遵循一般成功 response 的三行順序。日誌 retention、rotation 與存取控制由外部 log collector 或執行環境負責；即使已有 redaction，DEBUG 日誌仍可能包含業務資料，不應長期保留或開放不必要的存取權限。
 
 ---
 
