@@ -131,6 +131,7 @@ class AlgoSpec:
     inspection_name: str
     adapter_source: str
     cython: bool
+    dependencies: list[str]
     submodules: list[SubmoduleSpec]
 
 
@@ -167,9 +168,19 @@ def discover_descriptors() -> dict[str, AlgoSpec]:
         adapter_cfg = data.get("adapter", {})
         adapter_src: str = adapter_cfg.get("source", "")
         cython: bool = adapter_cfg.get("cython", True)
+        dependencies: list[str] = adapter_cfg.get("dependencies", [])
 
         if not adapter_src or not (PROJECT_ROOT / adapter_src).exists():
             print(f"ERROR: [{name}] adapter source not found: {adapter_src!r}")
+            sys.exit(1)
+        missing_dependencies = [
+            path for path in dependencies if not (PROJECT_ROOT / path).is_file()
+        ]
+        if missing_dependencies:
+            print(
+                f"ERROR: [{name}] adapter dependencies not found: "
+                f"{', '.join(missing_dependencies)}"
+            )
             sys.exit(1)
 
         submodules: list[SubmoduleSpec] = []
@@ -189,6 +200,7 @@ def discover_descriptors() -> dict[str, AlgoSpec]:
             inspection_name=name,
             adapter_source=adapter_src,
             cython=cython,
+            dependencies=dependencies,
             submodules=submodules,
         )
 
@@ -233,6 +245,9 @@ def compile_plan(selected: dict[str, AlgoSpec], edition: str = "standard") -> Co
             keenchic_cython[dotted_module_name] = spec.adapter_source
         else:
             keep_py.append(spec.adapter_source)
+        for dependency in spec.dependencies:
+            if dependency not in keep_py:
+                keep_py.append(dependency)
 
         for sm in spec.submodules:
             dir_rel = sm.dir.relative_to(PROJECT_ROOT)

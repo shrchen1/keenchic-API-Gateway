@@ -379,6 +379,50 @@ curl -X POST http://localhost:8000/api/v1/inspect \
 
 ---
 
+#### `ocr/meter-table-grid` — 整張溫度表格 OCR
+
+一次上傳一張表格影像，回傳表格內所有儲存格的辨識結果。`pred_text_L[row][column]` 以 row-major 順序對應影像中的表格位置。
+
+**Request**
+
+| 欄位 | 類型 | 必填 | 說明 |
+|---|---|---|---|
+| `image` | file | 是 | 表格影像 |
+| `table_size` | string | 是 | 格式 `"[rows,columns]"` 或 `"rows,columns"` |
+| `input_coords` | string | 否 | Grid Inspection 不接受，傳入時回 HTTP 422 |
+
+`rows` 僅允許 `1–8` 或 `15`，`columns` 僅允許 `1–8`；`[1,1]` 應使用 `ocr/meter-table`。`include_diag=true` 時額外回傳 Base64 PNG 診斷圖。
+
+**Response（成功）**
+
+```json
+{
+  "result": 0,
+  "pred_text_L": [
+    ["0.21", "76.19", "0.05", "0.16"],
+    ["0.21", "76.19", "0.05", "0.16"],
+    ["0.22", "77.27", "0.05", "0.17"],
+    ["0.12", "75.00", "0.03", "0.09"]
+  ]
+}
+```
+
+無法辨識的儲存格由 submodule 填入 `"N/G"`；只要 `pred_text_L` 非空，整體 `result` 仍為 `0`。整張影像無法辨識時回傳 `result=2` 與空的 `pred_text_L`。
+
+**curl 範例**
+
+```bash
+curl -X POST http://localhost:8000/api/v1/inspect \
+  -H "X-API-KEY: your-api-key" \
+  -H "X-Inspection-Name: ocr/meter-table-grid" \
+  -F "image=@/path/to/table.png" \
+  -F "table_size=[4,4]"
+```
+
+Grid Inspection 與 `ocr/meter-table` 共用 OpenVINO／TensorRT backend；兩者的 request 與 response contract 分開，既有指定單格 API 不受影響。
+
+---
+
 ## Taimide Edition 定制版
 
 當 `KEENCHIC_EDITION=taimide` 時，閘道會載入 Taimide 專屬的路由模組，並提供以下 API 端點。在標準版模式下，這些端點將無法存取（回傳 404）。

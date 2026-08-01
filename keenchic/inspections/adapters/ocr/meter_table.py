@@ -40,6 +40,7 @@ def _ensure_submodule_on_path() -> None:
         "procd_holo",
         "procd_temper",
         "procd_table",
+        "procd_table_L",
     ]:
         if mod_name in sys.modules:
             del sys.modules[mod_name]
@@ -150,7 +151,7 @@ class MeterTableAdapter(InspectionAdapter):
             self._cuda_context = None
         self._backend_active = None
 
-    def run(self, image: np.ndarray, **kwargs) -> dict:
+    def run(self, image: np.ndarray, **kwargs: Any) -> dict[str, Any]:
         if self._proc is None:
             raise RuntimeError("Models not loaded — call load_models() first")
 
@@ -173,35 +174,40 @@ class MeterTableAdapter(InspectionAdapter):
             }
         }
 
-        cuda_pushed = False
-        if self._cuda_context is not None and self._backend_active == "tensorrt":
-            self._cuda_context.push()
-            cuda_pushed = True
-
         try:
-            result = self._proc(
-                image=image,
-                detection_args=detection_args,
-                models=[self._detect_crop, self._model_crop, self._detect_num, self._model_num],
-                debug=False,
-            )
+            result = self._invoke_proc(image=image, detection_args=detection_args)
         except Exception as exc:
             result = {
                 "result": InspectionResultCode.DETECTION_FAILED,
                 "pred_text": "",
                 "_error": str(exc),
             }
+        return self._build_payload(result, include_diag)
+
+    def _invoke_proc(
+        self, image: np.ndarray, detection_args: dict[str, Any]
+    ) -> dict[str, Any]:
+        cuda_pushed = False
+        if self._cuda_context is not None and self._backend_active == "tensorrt":
+            self._cuda_context.push()
+            cuda_pushed = True
+
+        try:
+            return self._proc(
+                image=image,
+                detection_args=detection_args,
+                models=[self._detect_crop, self._model_crop, self._detect_num, self._model_num],
+                debug=False,
+            )
         finally:
             if cuda_pushed:
                 self._cuda_context.pop()
-
-        return self._build_payload(result, include_diag)
 
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _import_openvino(self) -> dict:
+    def _import_openvino(self) -> dict[str, Any]:
         from model_detect_openvino_512 import (  # type: ignore[import]
             detect_smp,
             detect_yolo12,
@@ -220,7 +226,7 @@ class MeterTableAdapter(InspectionAdapter):
             "cuda_context": None,
         }
 
-    def _import_trt(self) -> dict:
+    def _import_trt(self) -> dict[str, Any]:
         import pycuda.driver as cuda  # type: ignore[import]
 
         cuda.init()
@@ -244,7 +250,7 @@ class MeterTableAdapter(InspectionAdapter):
             "cuda_context": ctx,
         }
 
-    def _activate(self, imports: dict) -> None:
+    def _activate(self, imports: dict[str, Any]) -> None:
         self._detect_crop = imports["detect_crop"]
         self._detect_num = imports["detect_num"]
         self._get_crop_model = imports["get_crop_model"]
@@ -253,8 +259,10 @@ class MeterTableAdapter(InspectionAdapter):
         self._cuda_context = imports["cuda_context"]
         self._backend_active = imports["backend"]
 
-    def _build_payload(self, result: dict, include_diag: bool) -> dict:
-        payload: dict = {
+    def _build_payload(
+        self, result: dict[str, Any], include_diag: bool
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
             "result": int(result.get("result", InspectionResultCode.DETECTION_FAILED)),
             "pred_text": result.get("pred_text", ""),
         }
