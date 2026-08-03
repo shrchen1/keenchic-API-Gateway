@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Any
 
 import numpy as np
 
@@ -19,6 +20,11 @@ class InspectionAdapter(ABC):
         """
         return {"include_diag"}
 
+    @classmethod
+    def validate_kwargs(cls, kwargs: dict[str, Any]) -> None:
+        """Validate adapter-specific request values before model execution."""
+        return None
+
     @abstractmethod
     def load_models(self, backend: str) -> None:
         """Load all required model weights for the given backend.
@@ -32,7 +38,7 @@ class InspectionAdapter(ABC):
         """Release all loaded model objects and free memory."""
 
     @abstractmethod
-    def run(self, image: np.ndarray, **kwargs) -> dict:
+    def run(self, image: np.ndarray, **kwargs: Any) -> dict[str, Any]:
         """Execute inference on the given image.
 
         Args:

@@ -1,6 +1,6 @@
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class InspectResponse(BaseModel):
@@ -17,6 +17,7 @@ class InspectResponse(BaseModel):
 
     # Primary datecode OCR results
     pred_text: str = ""
+    pred_text_L: list[list[str]] = Field(default_factory=list)
     pred_text_b: str = ""
     pred_text_b2: str = ""
 

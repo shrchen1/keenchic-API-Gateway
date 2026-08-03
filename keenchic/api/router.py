@@ -125,7 +125,11 @@ async def inspect(
         None, description="Cell position '[row,col]' or 'row,col' (ocr/meter-table)"
     ),
     table_size: Optional[str] = Form(
-        None, description="Grid dimensions '[rows,cols]' or 'rows,cols' (ocr/meter-table)"
+        None,
+        description=(
+            "Grid dimensions '[rows,cols]' or 'rows,cols' "
+            "(ocr/meter-table, ocr/meter-table-grid)"
+        ),
     ),
     permit_image: Optional[UploadFile] = File(
         None, description="Optional permit code image (v2)"
@@ -174,6 +178,10 @@ async def inspect(
                 status_code=422,
                 detail=f"Fields not accepted by '{x_inspection_name}': {sorted(unexpected)}",
             )
+        try:
+            adapter_class.validate_kwargs(kwargs)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     try:
         result = await inspection_manager.run(x_inspection_name, img, **kwargs)
@@ -181,5 +189,10 @@ async def inspect(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        if x_inspection_name == "ocr/meter-table-grid":
+            log.exception("inspection.run_failed", inspection_name=x_inspection_name)
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise
 
     return JSONResponse(result)
