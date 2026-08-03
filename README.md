@@ -391,7 +391,7 @@ curl -X POST http://localhost:8000/api/v1/inspect \
 | `table_size` | string | 是 | 格式 `"[rows,columns]"` 或 `"rows,columns"` |
 | `input_coords` | string | 否 | Grid Inspection 不接受，傳入時回 HTTP 422 |
 
-`rows` 僅允許 `1–8` 或 `15`，`columns` 僅允許 `1–8`；`[1,1]` 應使用 `ocr/meter-table`。`include_diag=true` 時額外回傳 Base64 PNG 診斷圖。
+`rows` 僅允許 `1–8` 或 `15`，`columns` 僅允許 `1–8`；`[1,1]` 也支援 Grid，回傳形狀為 `[[value]]`。需要既有單格 API 行為時仍可使用 `ocr/meter-table`。`include_diag=true` 時額外回傳 Base64 PNG 診斷圖。
 
 **Response（成功）**
 

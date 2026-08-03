@@ -67,6 +67,27 @@ def test_grid_route_returns_matrix_and_forwards_table_size(
     assert calls[0]["table_size"] == "[4,4]"
 
 
+def test_grid_route_supports_single_cell_matrix(
+    grid_client: tuple[TestClient, list[dict[str, object]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, calls = grid_client
+
+    async def run(
+        inspection_name: str, image: np.ndarray, **kwargs: object
+    ) -> dict[str, object]:
+        calls.append({"inspection_name": inspection_name, "image": image, **kwargs})
+        return {"result": 0, "pred_text_L": [["0.21"]]}
+
+    monkeypatch.setattr(inspection_manager, "run", run)
+    response = _post_grid(client, table_size="[1,1]")
+
+    assert response.status_code == 200
+    assert response.json() == {"result": 0, "pred_text_L": [["0.21"]]}
+    assert calls[0]["inspection_name"] == "ocr/meter-table-grid"
+    assert calls[0]["table_size"] == "[1,1]"
+
+
 def test_grid_route_requires_table_size(
     grid_client: tuple[TestClient, list[dict[str, object]]],
 ) -> None:
@@ -91,7 +112,7 @@ def test_grid_route_rejects_input_coords(
     assert calls == []
 
 
-@pytest.mark.parametrize("table_size", ["[9,4]", "[4,9]", "[1,1]", "invalid"])
+@pytest.mark.parametrize("table_size", ["[9,4]", "[4,9]", "invalid"])
 def test_grid_route_rejects_unsupported_table_size(
     grid_client: tuple[TestClient, list[dict[str, object]]], table_size: str
 ) -> None:

@@ -34,11 +34,6 @@ def _parse_grid_table_size(raw: str | None) -> list[int]:
             "invalid table_size: columns must be between 1 and 8 for "
             f"'{GRID_INSPECTION_NAME}'"
         )
-    if rows == 1 and columns == 1:
-        raise ValueError(
-            "table_size '[1,1]' belongs to 'ocr/meter-table', not "
-            f"'{GRID_INSPECTION_NAME}'"
-        )
     return [rows, columns]
 
 

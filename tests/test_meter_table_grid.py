@@ -44,6 +44,22 @@ def test_grid_run_returns_submodule_matrix_unchanged(table_size: str) -> None:
     assert captured["detection_args"] == {"settings": {"table_size": [4, 4]}}
 
 
+def test_grid_run_supports_single_cell_grid() -> None:
+    expected = [["0.21"]]
+    captured: dict[str, Any] = {}
+
+    def proc(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"result": 0, "pred_text_L": expected}
+
+    result = _loaded_adapter(proc).run(
+        np.zeros((8, 8, 3), dtype=np.uint8), table_size="[1,1]"
+    )
+
+    assert result == {"result": 0, "pred_text_L": expected}
+    assert captured["detection_args"] == {"settings": {"table_size": [1, 1]}}
+
+
 def test_grid_run_preserves_unrecognized_cells_as_ng() -> None:
     expected = [["0.21", "N/G", "0.05", "0.16"]]
     adapter = _loaded_adapter(lambda **_: {"result": 0, "pred_text_L": expected})
@@ -118,7 +134,6 @@ def test_grid_run_rejects_unloaded_adapter() -> None:
         None,
         "[9,4]",
         "[4,9]",
-        "[1,1]",
         "[0,4]",
         "[4,0]",
         "not-a-size",
