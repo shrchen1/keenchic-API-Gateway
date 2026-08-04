@@ -60,6 +60,9 @@ uploads/
 .claude/
 CLAUDE.local.md
 
+## Codex personal project override
+AGENTS.override.md
+
 ## GitHub Copilot / Copilot CLI (GitHub)
 .copilot/
 .github/
