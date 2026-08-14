@@ -477,16 +477,34 @@ Grid Inspection 與 `ocr/meter-table` 共用 OpenVINO／TensorRT backend；兩�
   | 欄位 | 類型 | 必填 | 說明 |
 |------|------|------|------|
 | `file` | file | 是 | 填寫完的 Excel 檢測報告，限 `.xlsx` 格式，上限 10 MB |
+| `subfolder` | string | 否 | Report Group 的子目錄名稱；省略或空白時維持原有儲存位置 |
 
-- **說明**: 上傳填寫完的 Excel 報告，儲存於 `KEENCHIC_TAIMIDE_UPLOAD_DIR/reports/`。檔名直接從 `file.filename` 取得並進行安全消毒（保留中文字元、英數字、`-`、`_`，其餘字元過濾），不加上時間戳記或隨機碼，若重複則直接覆寫。
+- **說明**:
+  - 未提供 `subfolder`（或值為空白）時，Excel 報告儲存於 `KEENCHIC_TAIMIDE_UPLOAD_DIR/reports/`，既有行為與回應格式不變。
+  - 提供 `subfolder` 時，前後空白會先移除，報告儲存於 `KEENCHIC_TAIMIDE_UPLOAD_DIR/reports/{subfolder}/`；目錄不存在時自動建立。
+  - `subfolder` 僅接受 1–100 個 Unicode 英數字／中文字、`-`、`_`，不接受巢狀路徑或其他字元。
+  - 檔名直接從 `file.filename` 取得並進行安全消毒（保留中文字元、英數字、`-`、`_`，其餘字元過濾），不加上時間戳記或隨機碼；同一目錄內若重複則直接覆寫。
+- **Request 範例**:
+  ```bash
+  curl -X POST "${baseUrl}/api/taimide/v1/reports" \
+    -H "X-API-KEY: <api-key>" \
+    -F "file=@final_report.xlsx" \
+    -F "subfolder=LOT-001"
+  ```
 - **回應範例 (201 Created)**:
   ```json
   {
     "filename": "final_report.xlsx",
     "size_bytes": 45120,
-    "saved_to": "reports"
+    "saved_to": "reports",
+    "subfolder": "LOT-001"
   }
   ```
+- **錯誤行為**:
+  - `400 Bad Request`: `subfolder` 格式不合法，或上傳檔案不是 `.xlsx`。
+  - `409 Conflict`: 指定的 `subfolder` 已存在，但不是一般目錄或是 symbolic link。
+  - `422 Unprocessable Entity`: 上傳檔案為空。
+  - `413 Content Too Large`: 上傳檔案超過 10 MB。
 
 ### 啟動生命週期驗證
 
