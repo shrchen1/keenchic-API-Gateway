@@ -289,44 +289,182 @@ def test_upload_report_success(taimide_client):
     assert res_json["filename"] == "日常檢測報告.xlsx"
     assert res_json["size_bytes"] == len(report_data)
     assert res_json["saved_to"] == "reports"
+    assert "subfolder" not in res_json
 
     saved_file = upload_dir / "reports" / res_json["filename"]
     assert saved_file.is_file()
     assert saved_file.read_bytes() == report_data
 
 
+def test_upload_report_to_subfolder_creates_reuses_and_overwrites(taimide_client):
+    client, _, upload_dir = taimide_client
+
+    first_response = client.post(
+        "/api/taimide/v1/reports",
+        headers={"X-API-KEY": "test-key"},
+        files={"file": ("report.xlsx", b"first", "application/vnd.ms-excel")},
+        data={"subfolder": "  批號-LOT_001  "},
+    )
+    assert first_response.status_code == 201
+    assert first_response.json() == {
+        "filename": "report.xlsx",
+        "size_bytes": len(b"first"),
+        "saved_to": "reports",
+        "subfolder": "批號-LOT_001",
+    }
+
+    saved_file = upload_dir / "reports" / "批號-LOT_001" / "report.xlsx"
+    assert saved_file.read_bytes() == b"first"
+
+    second_response = client.post(
+        "/api/taimide/v1/reports",
+        headers={"X-API-KEY": "test-key"},
+        files={"file": ("report.xlsx", b"second", "application/vnd.ms-excel")},
+        data={"subfolder": "批號-LOT_001"},
+    )
+    assert second_response.status_code == 201
+    assert saved_file.read_bytes() == b"second"
+
+
+def test_upload_report_same_filename_in_different_subfolders(taimide_client):
+    client, _, upload_dir = taimide_client
+
+    for subfolder, content in (("Instrument_A", b"a"), ("Instrument_B", b"b")):
+        response = client.post(
+            "/api/taimide/v1/reports",
+            headers={"X-API-KEY": "test-key"},
+            files={"file": ("report.xlsx", content, "application/vnd.ms-excel")},
+            data={"subfolder": subfolder},
+        )
+        assert response.status_code == 201
+
+    assert (upload_dir / "reports" / "Instrument_A" / "report.xlsx").read_bytes() == b"a"
+    assert (upload_dir / "reports" / "Instrument_B" / "report.xlsx").read_bytes() == b"b"
+
+
+@pytest.mark.parametrize("subfolder", ["", "   "])
+def test_upload_report_blank_subfolder_preserves_existing_behavior(
+    taimide_client,
+    subfolder,
+):
+    client, _, upload_dir = taimide_client
+    response = client.post(
+        "/api/taimide/v1/reports",
+        headers={"X-API-KEY": "test-key"},
+        files={"file": ("report.xlsx", b"report", "application/vnd.ms-excel")},
+        data={"subfolder": subfolder},
+    )
+
+    assert response.status_code == 201
+    assert response.json() == {
+        "filename": "report.xlsx",
+        "size_bytes": len(b"report"),
+        "saved_to": "reports",
+    }
+    assert (upload_dir / "reports" / "report.xlsx").read_bytes() == b"report"
+
+
+@pytest.mark.parametrize(
+    "subfolder",
+    [
+        "LOT 001",
+        "../outside",
+        "..\\outside",
+        ".",
+        "..",
+        "LOT/001",
+        "LOT.001",
+        "批號!",
+        "A" * 101,
+    ],
+)
+def test_upload_report_invalid_subfolder_is_rejected(taimide_client, subfolder):
+    client, _, upload_dir = taimide_client
+    response = client.post(
+        "/api/taimide/v1/reports",
+        headers={"X-API-KEY": "test-key"},
+        files={"file": ("report.xlsx", b"report", "application/vnd.ms-excel")},
+        data={"subfolder": subfolder},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"].startswith("Invalid subfolder")
+    assert not (upload_dir / "outside").exists()
+
+
+def test_upload_report_subfolder_conflicts_with_file(taimide_client):
+    client, _, upload_dir = taimide_client
+    conflict_path = upload_dir / "reports" / "LOT-001"
+    conflict_path.write_bytes(b"not-a-directory")
+
+    response = client.post(
+        "/api/taimide/v1/reports",
+        headers={"X-API-KEY": "test-key"},
+        files={"file": ("report.xlsx", b"report", "application/vnd.ms-excel")},
+        data={"subfolder": "LOT-001"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Report subfolder conflicts with an existing path"
+
+
+def test_upload_report_subfolder_rejects_symlink(taimide_client):
+    client, _, upload_dir = taimide_client
+    outside_dir = upload_dir / "outside"
+    outside_dir.mkdir()
+    subfolder_link = upload_dir / "reports" / "LOT-001"
+    subfolder_link.symlink_to(outside_dir, target_is_directory=True)
+
+    response = client.post(
+        "/api/taimide/v1/reports",
+        headers={"X-API-KEY": "test-key"},
+        files={"file": ("report.xlsx", b"report", "application/vnd.ms-excel")},
+        data={"subfolder": "LOT-001"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Report subfolder conflicts with an existing path"
+    assert not (outside_dir / "report.xlsx").exists()
+
+
 def test_upload_report_invalid_ext(taimide_client):
-    client, _, _ = taimide_client
+    client, _, upload_dir = taimide_client
     response = client.post(
         "/api/taimide/v1/reports",
         headers={"X-API-KEY": "test-key"},
         files={"file": ("photo.png", b"png-content", "image/png")},
+        data={"subfolder": "LOT-001"},
     )
     assert response.status_code == 400
     assert "Invalid file extension" in response.json()["detail"]
+    assert not (upload_dir / "reports" / "LOT-001").exists()
 
 
 def test_upload_report_empty(taimide_client):
-    client, _, _ = taimide_client
+    client, _, upload_dir = taimide_client
     response = client.post(
         "/api/taimide/v1/reports",
         headers={"X-API-KEY": "test-key"},
         files={"file": ("report.xlsx", b"", "application/vnd.ms-excel")},
+        data={"subfolder": "LOT-001"},
     )
     assert response.status_code == 422
     assert "empty" in response.json()["detail"].lower()
+    assert not (upload_dir / "reports" / "LOT-001").exists()
 
 
 def test_upload_report_too_large(taimide_client):
-    client, _, _ = taimide_client
+    client, _, upload_dir = taimide_client
     large_data = b"x" * (10 * 1024 * 1024 + 1)
     response = client.post(
         "/api/taimide/v1/reports",
         headers={"X-API-KEY": "test-key"},
         files={"file": ("report.xlsx", large_data, "application/vnd.ms-excel")},
+        data={"subfolder": "LOT-001"},
     )
     assert response.status_code == 413
     assert "exceeds" in response.json()["detail"]
+    assert not (upload_dir / "reports" / "LOT-001").exists()
 
 # ---------------------------------------------------------------------------
 # Tests: taimide startup validation

@@ -495,6 +495,7 @@ def test_taimide_upload_and_download_log_metadata_without_binary(
     upload_response = client.post(
         "/api/taimide/v1/reports",
         headers={"X-API-KEY": "taimide-api-secret"},
+        data={"subfolder": "批號-LOT_001"},
         files={
             "file": (
                 "檢測報告.xlsx",
@@ -516,12 +517,17 @@ def test_taimide_upload_and_download_log_metadata_without_binary(
         "http.request",
         "/api/taimide/v1/reports",
     )
+    assert upload_event["payload"]["fields"] == {"subfolder": "批號-LOT_001"}
     assert upload_event["payload"]["files"][0] == {
         "field_name": "file",
         "filename": "檢測報告.xlsx",
         "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "size_bytes": len(b"excel-upload-binary-secret"),
     }
+    report_saved_event = next(
+        event for event in events if event.get("event") == "taimide.report_saved"
+    )
+    assert report_saved_event["subfolder"] == "批號-LOT_001"
     download_event = next(
         event
         for event in events

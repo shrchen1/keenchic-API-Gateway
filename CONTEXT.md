@@ -27,3 +27,9 @@ _Avoid_: Missing cell, empty cell, unavailable cell
 **Grid Inspection Failure**:
 A Grid Inspection outcome in which no Grid Result can be produced from the image.
 _Avoid_: Partial failure, Unrecognized Cell
+
+## Report Uploads
+
+**Report Group**:
+A client-chosen grouping of related Excel inspection reports, typically reports for the same batch produced by different instruments.
+_Avoid_: Subfolder, batch folder
