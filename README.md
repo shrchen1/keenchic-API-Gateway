@@ -601,6 +601,14 @@ Python 3.11 以上使用標準函式庫 `tomllib`；Jetson 常見的 Python 3.10
 ### 基本用法
 
 ```bash
+# 產生正式 Taimide Jetson Orin release（固定 profile）
+python3 build_wheel.py --profile taimide-jetson
+
+# 也可明確指定 release version
+python3 build_wheel.py \
+  --profile taimide-jetson \
+  --release-version 2026.8.23
+
 # 列出所有可打包的算法
 python3 build_wheel.py --list
 
@@ -618,6 +626,29 @@ python3 build_wheel.py -a ocr/datecode-num -a ocr/pill-count
 python3 build_wheel.py --edition taimide -a ocr/datecode-num
 ```
 
+`taimide-jetson` 是正式發佈 profile，只支援 Jetson Orin、L4T R36.4.4、
+Python 3.10、CUDA 12.6、TensorRT 10.3.x 與 PyCUDA 2026.1。它只包含
+`ocr/meter-table` 與 `ocr/meter-table-grid`，且不能和 `--edition` 或
+`--algorithm` 混用。PyCUDA 只會被寫入 wheel dependency metadata，不會被打包進
+wheel；Build Jetson 與 Target Jetson 都必須先安裝與 system CUDA 相容的
+PyCUDA 2026.1。
+
+`--release-version` 是可選參數；省略時會使用 Build Jetson 的系統本地日期，
+並依 `dist/` 中同日既有版本自動選擇最大 revision 的下一號。明確指定時必須使用
+`YYYY.M.D` 或 `YYYY.M.D.N`；同日 revision 從 `.1` 開始，不使用 `.0`。
+已存在的 release directory 不會被覆寫。
+
+profile 會從每個 engine 的檔名 `-YYYYMMDD.trt` 選擇日期最新者，不使用
+mtime。如需有意回退 model，可明確指定：
+
+```bash
+python3 build_wheel.py \
+  --profile taimide-jetson \
+  --release-version 2026.8.23.1 \
+  --engine-date head=20260807 \
+  --engine-date yolo=20260806
+```
+
 ### 產出 wheel 命名規則
 
 | 打包範圍 | wheel 檔名 |
@@ -626,6 +657,7 @@ python3 build_wheel.py --edition taimide -a ocr/datecode-num
 | 公版指定算法 | `keenchic_api_gateway-0.1.0+ocr_datecode_num-...-linux_aarch64.whl` |
 | Taimide 全部算法 | `keenchic_api_gateway-0.1.0+taimide-...-linux_aarch64.whl` |
 | Taimide 指定算法 | `keenchic_api_gateway-0.1.0+taimide.ocr_datecode_num-...-linux_aarch64.whl` |
+| Taimide Jetson profile | `dist/2026.8.23/keenchic_api_gateway-2026.8.23+taimide-cp310-cp310-linux_aarch64.whl` |
 
 子集 build 使用 PEP 440 local version tag 標識所含算法，避免與完整 wheel 衝突。後裝的 wheel 會取代先裝的，無法同時安裝多個版本。
 
@@ -635,6 +667,13 @@ python3 build_wheel.py --edition taimide -a ocr/datecode-num
 
 - Cython 編譯的 `.so`（adapter + submodule 模組）
 - 模型權重（`*/weights/*`）
+
+Taimide Jetson profile 只收錄被選中的 head 與 yolo TensorRT engine，不收錄
+舊版 engine 或 Windows engine。它會另外產生 `build-manifest.json`、
+`target-constraints.txt` 與 `SHA256SUMS`；manifest 也會嵌入 wheel，用來記錄
+runtime profile、算法、engine 版本、source/input hash 與 Git revision（如可用）。
+正式 build 會強制檢查 runtime、engine 反序列化、wheel 內容，並在不依賴
+source repo 的暫存 venv 安裝驗證 `keenchic-serve --help` 與 packaged engines。
 
 ### Descriptor 格式（`*.build.toml`）
 
@@ -665,6 +704,11 @@ bare = [
 ]
 
 weights_subdir = "weights"   # 相對 dir，打包進 wheel 的 package_data
+
+# 可選：正式 profile 的預建 TensorRT engine；以檔名日期選擇最新版
+engine = [
+  { profile = "taimide-jetson", name = "head", pattern = "smp_Unet++_head_table_512-*.trt" },
+]
 ```
 
 ---

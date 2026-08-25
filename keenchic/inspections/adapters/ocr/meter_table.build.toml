@@ -2,7 +2,7 @@ inspection_name = "ocr/meter-table"
 
 [adapter]
 source = "keenchic/inspections/adapters/ocr/meter_table.py"
-cython = false
+cython = true
 
 [[submodule]]
 dir = "keenchic/inspections/ocr/temper_num_st"
@@ -13,3 +13,7 @@ bare = [
     { name = "utils",                     src = "utils.py"                     },
 ]
 weights_subdir = "weights"
+engine = [
+    { profile = "taimide-jetson", name = "head", pattern = "smp_Unet++_head_table_512-*.trt" },
+    { profile = "taimide-jetson", name = "yolo", pattern = "yolo12_512_temper-*.trt" },
+]
