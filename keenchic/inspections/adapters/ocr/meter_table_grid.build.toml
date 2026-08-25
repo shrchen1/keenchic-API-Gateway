@@ -2,7 +2,7 @@ inspection_name = "ocr/meter-table-grid"
 
 [adapter]
 source = "keenchic/inspections/adapters/ocr/meter_table_grid.py"
-cython = false
+cython = true
 dependencies = [
     "keenchic/inspections/adapters/ocr/meter_table.py",
 ]
@@ -17,3 +17,7 @@ bare = [
     { name = "utils",                     src = "utils.py"                     },
 ]
 weights_subdir = "weights"
+engine = [
+    { profile = "taimide-jetson", name = "head", pattern = "smp_Unet++_head_table_512-*.trt" },
+    { profile = "taimide-jetson", name = "yolo", pattern = "yolo12_512_temper-*.trt" },
+]
